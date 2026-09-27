@@ -14,6 +14,7 @@ import (
 
 	"github.com/wyw14/solo-037/internal/model"
 	"github.com/wyw14/solo-037/internal/probe"
+	"github.com/wyw14/solo-037/internal/resistance"
 )
 
 // MeasuredRun contains observations supplied by an operator, unlike the
@@ -36,6 +37,14 @@ type MeasurementAnalysis struct {
 	ForceCount int             `json:"force_count"`
 	ForceMean  float64         `json:"force_mean"`
 	Evaluated  time.Time       `json:"evaluated_at"`
+}
+
+// ResistanceAnalysis is the resistance-versus-speed curve of one measured
+// run, derived deterministically from its archived speed and force frames.
+type ResistanceAnalysis struct {
+	Operation model.Operation `json:"operation"`
+	resistance.Result
+	Evaluated time.Time `json:"evaluated_at"`
 }
 
 type MeasurementArchive struct {
@@ -124,8 +133,8 @@ func (a *MeasurementArchive) Create(name, modelName, section, carriage string) (
 }
 
 func (a *MeasurementArchive) Record(id model.RunID, input MeasurementInput) (model.Evidence, error) {
-	if input.Kind != model.EvidenceWaveTime && input.Kind != model.EvidenceForce {
-		return model.Evidence{}, errors.New("measurement kind must be wave_time or force")
+	if input.Kind != model.EvidenceWaveTime && input.Kind != model.EvidenceForce && input.Kind != model.EvidenceSpeed {
+		return model.Evidence{}, errors.New("measurement kind must be wave_time, force or speed")
 	}
 	if strings.TrimSpace(input.SourceID) == "" || math.IsNaN(input.Value) || math.IsInf(input.Value, 0) || input.RecordedAt.IsZero() || input.RecordedAt.After(time.Now().Add(time.Minute)) {
 		return model.Evidence{}, errors.New("source, finite value and valid observation time are required")
@@ -190,6 +199,18 @@ func (a *MeasurementArchive) Analyze(id model.RunID) (MeasurementAnalysis, error
 	return result, nil
 }
 
+func (a *MeasurementArchive) AnalyzeResistance(id model.RunID, params resistance.Params) (ResistanceAnalysis, error) {
+	run, exists := a.Get(id)
+	if !exists {
+		return ResistanceAnalysis{}, errors.New("run not found")
+	}
+	return ResistanceAnalysis{
+		Operation: run.Operation,
+		Result:    resistance.Analyze(run.Evidence, params),
+		Evaluated: time.Now().UTC(),
+	}, nil
+}
+
 func (r *Runtime) CreateMeasuredRun(name, modelName, section, carriage string) (MeasuredRun, error) {
 	return r.Measurements.Create(name, modelName, section, carriage)
 }
@@ -204,4 +225,8 @@ func (r *Runtime) MeasuredRun(id model.RunID) (MeasuredRun, bool) { return r.Mea
 
 func (r *Runtime) AnalyzeMeasuredRun(id model.RunID) (MeasurementAnalysis, error) {
 	return r.Measurements.Analyze(id)
+}
+
+func (r *Runtime) AnalyzeResistance(id model.RunID, params resistance.Params) (ResistanceAnalysis, error) {
+	return r.Measurements.AnalyzeResistance(id, params)
 }

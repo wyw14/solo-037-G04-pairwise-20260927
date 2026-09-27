@@ -8,6 +8,7 @@ const (
     EvidenceWaveTime EvidenceKind = "wave_time"
     EvidenceWaveSpectrum EvidenceKind = "wave_spectrum"
     EvidenceForce EvidenceKind = "force"
+    EvidenceSpeed EvidenceKind = "speed"
     EvidencePosition EvidenceKind = "position"
     EvidenceBrake EvidenceKind = "brake"
 )
