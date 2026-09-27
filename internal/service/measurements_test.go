@@ -65,3 +65,53 @@ func TestOperatorMeasurementRejectsInvalidAndUnknownRun(t *testing.T) {
 		t.Fatal("rejected values changed archive")
 	}
 }
+
+func TestResistanceAnalysisPairsPersistedSpeedAndForceFrames(t *testing.T) {
+	directory := t.TempDir()
+	a, err := OpenMeasurementArchive(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := a.Create("tow C", "hull Y", "section-a", "carriage-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := time.Now().Add(-time.Minute).UTC()
+	inputs := []MeasurementInput{
+		{Kind: model.EvidenceVelocity, SourceID: "encoder", Value: 1.0, RecordedAt: at},
+		{Kind: model.EvidenceVelocity, SourceID: "encoder", Value: 1.02, RecordedAt: at.Add(400 * time.Millisecond)},
+		{Kind: model.EvidenceForce, SourceID: "load-cell", Value: 12.0, RecordedAt: at.Add(100 * time.Millisecond)},
+		{Kind: model.EvidenceForce, SourceID: "load-cell", Value: 12.4, RecordedAt: at.Add(500 * time.Millisecond)},
+		{Kind: model.EvidenceVelocity, SourceID: "encoder", Value: 2.0, RecordedAt: at.Add(2 * time.Second)},
+		{Kind: model.EvidenceForce, SourceID: "load-cell", Value: 48.0, RecordedAt: at.Add(2 * time.Second)},
+	}
+	for _, input := range inputs {
+		if _, err := a.Record(run.Operation.ID, input); err != nil {
+			t.Fatal(err)
+		}
+	}
+	loaded, err := OpenMeasurementArchive(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	analysis, err := loaded.AnalyzeResistance(run.Operation.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	points := analysis.Curve.Points
+	if len(points) != 2 {
+		t.Fatalf("expected 2 paired windows after reload, got %+v", analysis.Curve)
+	}
+	if math.Abs(points[0].Speed-1.01) > 1e-9 || math.Abs(points[0].Force-12.2) > 1e-9 || points[0].Uncertainty <= 0 {
+		t.Fatalf("first point wrong: %+v", points[0])
+	}
+	if points[1].Speed != 2.0 || points[1].Force != 48.0 || points[1].ForceFrames != 1 {
+		t.Fatalf("second point wrong: %+v", points[1])
+	}
+	if len(points[0].Evidence) != 4 {
+		t.Fatalf("point not traceable to archived frames: %+v", points[0])
+	}
+	if _, err := loaded.AnalyzeResistance("missing", 0); err == nil {
+		t.Fatal("unknown run analyzed")
+	}
+}
